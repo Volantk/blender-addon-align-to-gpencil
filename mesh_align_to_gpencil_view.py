@@ -20,25 +20,32 @@ bl_info = {
     "name": "Align Selection To Gpencil Stroke",
     "description": "Aligns selection to a grease pencil stroke. Hold SHIFT and double-click LEFT MOUSE to execute.",
     "author": "Bjørnar Frøyse",
-    "version": (1, 0, 8),
-    "blender": (2, 7, 0),
+    "version": (1, 2, 0),
+    "blender": (2, 80, 0),
     "location": "Tool Shelf",
-    "warning": "",  # used for warning icon and text in addons panel
-    "wiki_url": "",
-    "tracker_url": "",
-    "category": "Mesh"}
-
+    # "warning": "nooo",  # used for warning icon and text in addons panel
+    # "wiki_url": "",
+    # "tracker_url": "",
+    "category": "Mesh"
+}
 
 import bpy
 from bpy_extras import view3d_utils
 import bmesh
 import mathutils
 from bpy.props import FloatProperty, BoolProperty
+from bpy.types import Operator
 import math
 
+# TODO: Implement surface snap/projection (for retopo).
+# TODO: Option to lock axis?
+# TODO: More flexible "projection"? Currently only vertical & horizontal. Works in most cases, but can easily be a bit wonky.
+# TODO: Make it work with the mesh.use_mirror_x setting.
+# TODO: Proportional editing
+# TODO: Support for bones (pose mode)
 
 # Preferences for the addon (Displayed "inside" the addon in user preferences)
-class AlignSelectionToGpencilAddonPrefs(bpy.types.AddonPreferences):
+class PREFS_bear_align_to_gpencil(bpy.types.AddonPreferences):
     bl_idname = __name__
     clear_strokes = bpy.props.BoolProperty(
             name = "Clear Strokes On Execute",
@@ -52,13 +59,37 @@ class AlignSelectionToGpencilAddonPrefs(bpy.types.AddonPreferences):
             layout.label(text="Be warned: This will currently make the influence slider stop working", icon="ERROR")
 
 
-class AlignUVsToGpencil(bpy.types.Operator):
-    """Aligns UV selection to gpencil stroke"""
-    bl_idname = "bear.uv_align_to_gpencil"
-    bl_label = "Align UV Verts to Gpencil"
+
+class OBJECT_OT_bear_align_to_gpencil(Operator):
+    """Aligns selected objects to grease pencil stroke"""
+    bl_idname = "object.bear_align_selection_to_gpencil"
+    bl_label = "Align objects to Grease Pencil"
     bl_options = {'REGISTER', 'UNDO'}
 
-    influence = FloatProperty(
+    influence: FloatProperty(
+            name="Influence",
+            description="Influence",
+            min=0.0, max=1.0,
+            default=1.0,
+            )
+
+    def execute(self, context):
+        # Object mode
+        if bpy.context.mode == 'OBJECT':
+            align_objects(context, self.influence)
+            return {'FINISHED'}
+
+        print("No valid cases found. Try again with another selection!")
+        return{'FINISHED'}
+
+class UV_OT_bear_align_to_gpencil(Operator):
+    """Aligns UV selection to gpencil stroke"""
+    """Aligns selection to grease pencil stroke"""
+    bl_idname = "uv.bear_align_selection_to_gpencil"
+    bl_label = "Align UV vertices to Grease Pencil"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    influence: FloatProperty(
             name="Influence",
             description="Influence",
             min=0.0, max=1.0,
@@ -70,55 +101,13 @@ class AlignUVsToGpencil(bpy.types.Operator):
         return {'FINISHED'}
 
 
-def align_uvs(context, influence):
-    uvGP = bpy.context.area.spaces[0].grease_pencil
-
-    ok = False
-    if(uvGP is not None):
-        if(len(uvGP.layers)>0):
-            if(len(uvGP.layers[-1].active_frame.strokes) > 0):
-                ok = True
-    if(ok == False):
-        return
-
-    gp = uvGP.layers[-1].active_frame
-    obj = bpy.context.edit_object
-    me = obj.data
-    bm = bmesh.from_edit_mesh(me)
-
-    uv_layer = bm.loops.layers.uv.verify()
-    bm.faces.layers.tex.verify()
-
-    selected_uv_verts = []
-    for f in bm.faces:
-        for l in f.loops:
-            l_uv = l[uv_layer]
-            if l_uv.select:
-                selected_uv_verts.append(l_uv)
-
-    selected_uv_verts_positions = []
-    for vert in selected_uv_verts:
-        selected_uv_verts_positions.append(vert.uv)
-
-    gpencil_points = [point.co for point in gp.strokes[-1].points]
-
-    for i, v in enumerate(selected_uv_verts):
-        nearest_point = get_nearest_interpolated_point_on_stroke(selected_uv_verts_positions[i], gpencil_points, context)
-        v.uv = v.uv.lerp(nearest_point, influence)
-
-    bmesh.update_edit_mesh(me, True)
-
-    if context.user_preferences.addons[__name__].preferences.clear_strokes:
-       gp.strokes.remove(gp.strokes[-1])
-
-
-class AlignSelectionToGPencil(bpy.types.Operator):
-    """Aligns selection to gpencil stroke"""
-    bl_idname = "bear.align_to_gpencil"
-    bl_label = "Align Verts to Gpencil"
+class MESH_OT_bear_align_to_gpencil(Operator):
+    """Aligns selection to grease pencil stroke"""
+    bl_idname = "mesh.bear_align_selection_to_gpencil"
+    bl_label = "Align Verts to Grease Pencil"
     bl_options = {'REGISTER', 'UNDO'}
 
-    influence = FloatProperty(
+    influence: FloatProperty(
             name="Influence",
             description="Influence",
             min=0.0, max=1.0,
@@ -126,30 +115,50 @@ class AlignSelectionToGPencil(bpy.types.Operator):
             )
 
     def execute(self, context):
-
-        # TODO: Make it able to project the selected vertices onto a surface (for retopo).
-        # TODO: Option to lock axis?
-        # TODO: More flexible "projection"? Currently only vertical & horizontal.
-        #       Works in most cases, but can easily break.
-        # TODO: Make it work with the mesh.use_mirror_x setting.
-        # TODO: Proportional editing
-        # TODO: Support for bones (pose mode)
-
-        # Object mode
-        if bpy.context.mode == 'OBJECT':
-            align_objects(context, self.influence)
-            return {'FINISHED'}
-
         # Edit mode (vertices)
         if bpy.context.active_object.type == 'MESH' and bpy.context.active_object.data.is_editmode:
             align_vertices(context, self.influence)
             return {'FINISHED'}
 
+        print("No valid cases found. Try again with another selection!")
+        return{'FINISHED'}
+
+class CURVE_OT_bear_align_to_gpencil(Operator):
+    """Aligns selection to grease pencil stroke"""
+    bl_idname = "curve.bear_align_selection_to_gpencil"
+    bl_label = "Align curve points to Grease Pencil"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    influence: FloatProperty(
+            name="Influence",
+            description="Influence",
+            min=0.0, max=1.0,
+            default=1.0,
+            )
+
+    def execute(self, context):
         # Curves
         if bpy.context.active_object.type == 'CURVE' and bpy.context.active_object.data.is_editmode:
             align_curves(context, self.influence)
             return {'FINISHED'}
 
+        print("No valid cases found. Try again with another selection!")
+        return{'FINISHED'}
+
+class ARMATURE_OT_bear_align_to_gpencil(Operator):
+    """Aligns selection to grease pencil stroke"""
+    bl_idname = "armature.bear_align_selection_to_gpencil"
+    bl_label = "Align armature (edit) bones points to Grease Pencil"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    influence: FloatProperty(
+            name="Influence",
+            description="Influence",
+            min=0.0, max=1.0,
+            default=1.0,
+            )
+
+    def execute(self, context):
         # Bone edit mode
         if bpy.context.active_object.type == 'ARMATURE' and bpy.context.active_object.data.is_editmode:
             align_bones_editmode(context, self.influence)
@@ -158,9 +167,9 @@ class AlignSelectionToGPencil(bpy.types.Operator):
         print("No valid cases found. Try again with another selection!")
         return{'FINISHED'}
 
-    @classmethod
-    def poll(cls, context):
-        return check_if_any_gp_exists(context)
+    # @classmethod
+    # def poll(cls, context):
+    #     return check_if_any_gp_exists(context)
 
 def align_bones_editmode(context, influence):
     obj = bpy.context.edit_object
@@ -178,11 +187,11 @@ def align_bones_editmode(context, influence):
     
     for i, bone in enumerate(selected_bones):
         nearest_point_for_head = get_nearest_interpolated_point_on_stroke(bone_heads_2d[i], stroke, context)
-        newcoord_for_head = obj.matrix_world.inverted() * region_to_location(nearest_point_for_head, obj.matrix_world * bone.head)
+        newcoord_for_head = obj.matrix_world.inverted() @ region_to_location(nearest_point_for_head, obj.matrix_world @ bone.head)
         bone.head = bone.head.lerp(newcoord_for_head, influence)
 
         nearest_point_for_tail = get_nearest_interpolated_point_on_stroke(bone_tails_2d[i], stroke, context)
-        newcoord_for_tail = obj.matrix_world.inverted() * region_to_location(nearest_point_for_tail, obj.matrix_world * bone.tail)
+        newcoord_for_tail = obj.matrix_world.inverted() @ region_to_location(nearest_point_for_tail, obj.matrix_world @ bone.tail)
         bone.tail = bone.tail.lerp(newcoord_for_tail, influence)
 
 
@@ -210,7 +219,7 @@ def align_vertices(context, influence):
         nearest_point = get_nearest_interpolated_point_on_stroke(verts_world_2d[i], stroke, context)
         # Get new vertex coordinate by converting from 2D screen space to 3D world space. Must multiply depth coordinate
         # with world matrix and then final result by INVERTED world matrix to get a correct final value.
-        newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * v.co)
+        newcoord = obj.matrix_world.inverted() @ region_to_location(nearest_point, obj.matrix_world @ v.co)
         # Apply the final position using an influence slider.
         v.co = v.co.lerp(newcoord, influence)
 
@@ -252,7 +261,7 @@ def align_curves(context, influence):
             nearest_point = get_nearest_interpolated_point_on_stroke(points_world_2d[i], stroke, context)
             # Get new vertex coordinate by converting from 2D screen space to 3D world space. Must multiply depth coordinate
             # with world matrix and then final result by INVERTED world matrix to get a correct final value.
-            newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * p.co)
+            newcoord = obj.matrix_world.inverted() @ region_to_location(nearest_point, obj.matrix_world @ p.co)
             # Apply the final position using an influence slider.
 
             newcoord = newcoord.to_4d()
@@ -268,18 +277,20 @@ def align_curves(context, influence):
         bezier_points_local_3d = [p.co for p in selected_bezier_points]
         bezier_points_world_2d = vectors_to_screenpos(context, bezier_points_local_3d, obj.matrix_world)
 
-        stroke = gpencil_to_screenpos(context)
-
         for i, p in enumerate(selected_bezier_points):
-            nearest_point = get_nearest_interpolated_point_on_stroke(bezier_points_world_2d[i], stroke, context)
-            newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * p.co)
             if p.handle_left_type == 'FREE' or p.handle_left_type == 'ALIGNED' or p.handle_right_type == 'FREE' or p.handle_right_type == 'ALIGNED':
                 print("Supported handle modes: 'VECTOR', 'AUTO'. Please convert. Sorry!")
                 return{'CANCELLED'}
 
+        stroke = gpencil_to_screenpos(context)
+
+        for i, p in enumerate(selected_bezier_points):
+            nearest_point = get_nearest_interpolated_point_on_stroke(bezier_points_world_2d[i], stroke, context)
+            newcoord = obj.matrix_world.inverted() @ region_to_location(nearest_point, obj.matrix_world @ p.co)
+
             p.co = p.co.lerp(newcoord.to_4d(), influence)
-            p.handle_left = obj.matrix_world.inverted() * region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_left, stroke, context), obj.matrix_world * p.handle_left) 
-            p.handle_right = obj.matrix_world.inverted() * region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_right, stroke, context), obj.matrix_world * p.handle_right) 
+            p.handle_left = obj.matrix_world.inverted() @ region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_left, stroke, context), obj.matrix_world @ p.handle_left) 
+            p.handle_right = obj.matrix_world.inverted() @ region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_right, stroke, context), obj.matrix_world @ p.handle_right) 
 
 
 def align_objects(context, influence):
@@ -288,7 +299,7 @@ def align_objects(context, influence):
     stroke = gpencil_to_screenpos(context)
 
     for i, obj in enumerate(selected_objs):
-        obj_loc_2d = vectors_to_screenpos(context, obj.location, obj.matrix_world * obj.matrix_world.inverted())
+        obj_loc_2d = vectors_to_screenpos(context, obj.location, obj.matrix_world @ obj.matrix_world.inverted())
         nearest_point = get_nearest_interpolated_point_on_stroke(obj_loc_2d, stroke, context)
 
         newcoord = region_to_location(nearest_point, obj.location)
@@ -413,7 +424,7 @@ def gpencil_to_screenpos(context):
         points_2d = [(0,0), (0,10)]
     else:
         points_2d = [location_to_region(point.co) for point in gp.strokes[-1].points if (len(gp.strokes) > 0)]
-        if context.user_preferences.addons[__name__].preferences.clear_strokes:
+        if bpy.context.preferences.addons[__name__].preferences.clear_strokes:
             gp.strokes.remove(gp.strokes[-1])
 
     
@@ -440,20 +451,20 @@ def check_if_object_gp_exists(context):
 
 
 def check_if_scene_gp_exists(context):
-    sceneGP = bpy.context.scene.grease_pencil
+    gps = bpy.context.scene.grease_pencil
 
-    if(sceneGP is not None):
-        if(len(sceneGP.layers)>0):
-            if(len(sceneGP.layers[-1].active_frame.strokes) > 0):
+    if(gps is not None):
+        if(len(gps.layers)>0):
+            if(len(gps.layers[-1].active_frame.strokes) > 0):
                 return True
 
     return False
 
 def vectors_to_screenpos(context, list_of_vectors, matrix):
     if type(list_of_vectors) is mathutils.Vector:
-        return location_to_region(matrix * list_of_vectors)
+        return location_to_region(matrix @ list_of_vectors)
     else:
-        return [location_to_region(matrix * vector) for vector in list_of_vectors]
+        return [location_to_region(matrix @ vector) for vector in list_of_vectors]
 
 
 # Generic clamp function
@@ -482,7 +493,7 @@ def is_vertical(vertex, list_of_vec2):
         return False
     if (maxval[0] - minval[0] < maxval[1] - minval[1]):
         return True
-
+    
 
 # Generic map range function.
 # grabbed from here: www.rosettacode.org/wiki/Map_range
@@ -503,52 +514,76 @@ def location_to_region(worldcoords):
 def region_to_location(viewcoords, depthcoords):
     return view3d_utils.region_2d_to_location_3d(bpy.context.region, bpy.context.space_data.region_3d, viewcoords, depthcoords)
 
+classes = (OBJECT_OT_bear_align_to_gpencil,
+    UV_OT_bear_align_to_gpencil,
+    MESH_OT_bear_align_to_gpencil,
+    CURVE_OT_bear_align_to_gpencil,
+    ARMATURE_OT_bear_align_to_gpencil,
+    PREFS_bear_align_to_gpencil)
 
-class AlignSelectionToGpencilBUTTON(bpy.types.Panel):
-    bl_category = "Tools"
-    bl_label = "Gpencil Align"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "TOOLS"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.operator("bear.align_to_gpencil")
-
-class AlignUVsToGpencilBUTTON(bpy.types.Panel):
-    bl_category = "Tools"
-    bl_label = "Gpencil Align"
-    bl_space_type = 'IMAGE_EDITOR'
-    bl_region_type = "TOOLS"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.operator("bear.uv_align_to_gpencil")
-
-
-classes = [AlignSelectionToGpencilAddonPrefs, AlignSelectionToGPencil, AlignSelectionToGpencilBUTTON, AlignUVsToGpencil, AlignUVsToGpencilBUTTON]
 addon_keymaps = []
 
-def register():
-    for c in classes:
-        bpy.utils.register_class(c)
+def bind_keymap():
 
-    km = bpy.context.window_manager.keyconfigs.addon.keymaps.new(name='3D View', space_type='VIEW_3D')
-    kmi = km.keymap_items.new("bear.align_to_gpencil", 'LEFTMOUSE', 'DOUBLE_CLICK', False, True)
+    try:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps["Mesh"]
+    except Exception as e:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Mesh", space_type='EMPTY', region_type='WINDOW')
+        pass
+    kmi = km.keymap_items.new(idname="mesh.bear_align_selection_to_gpencil", type='LEFTMOUSE', value='DOUBLE_CLICK', any=False, shift=True)
     addon_keymaps.append((km, kmi))
 
-    km = bpy.context.window_manager.keyconfigs.addon.keymaps.new(name='UV Editor', space_type='IMAGE_EDITOR')
-    kmi = km.keymap_items.new("bear.uv_align_to_gpencil", 'LEFTMOUSE', 'DOUBLE_CLICK', False, True)
+    try:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps["Object Mode"]
+    except Exception as e:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Object Mode", space_type='EMPTY', region_type='WINDOW')
+        pass
+    kmi = km.keymap_items.new(idname="object.bear_align_selection_to_gpencil", type='LEFTMOUSE', value='DOUBLE_CLICK', any=False, shift=True)
+    addon_keymaps.append((km, kmi))
+
+    try:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps["UV Editor"]
+    except Exception as e:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("UV Editor", space_type='EMPTY', region_type='WINDOW')
+        pass
+    kmi = km.keymap_items.new(idname="uv.bear_align_selection_to_gpencil", type='LEFTMOUSE', value='DOUBLE_CLICK', any=False, shift=True)
+    addon_keymaps.append((km, kmi))
+
+    try:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps["Armature"]
+    except Exception as e:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Armature", space_type='EMPTY', region_type='WINDOW')
+        pass
+    kmi = km.keymap_items.new(idname="armature.bear_align_selection_to_gpencil", type='LEFTMOUSE', value='DOUBLE_CLICK', any=False, shift=True)
+    addon_keymaps.append((km, kmi))
+
+    try:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps["Curve"]
+    except Exception as e:
+        km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Curve", space_type='EMPTY', region_type='WINDOW')
+        pass
+    kmi = km.keymap_items.new(idname="curve.bear_align_selection_to_gpencil", type='LEFTMOUSE', value='DOUBLE_CLICK', any=False, shift=True)
     addon_keymaps.append((km, kmi))
 
 
-def unregister():
+def unbind_keymap():
     for km, kmi in addon_keymaps:
         km.keymap_items.remove(kmi)
     addon_keymaps.clear()
-    
-    for c in reversed(classes):
-        bpy.utils.unregister_class(c)
 
-
+def register():
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)
+    bind_keymap()
+ 
+ 
+def unregister():
+    from bpy.utils import unregister_class
+    for cls in reversed(classes):
+        unregister_class(cls)
+    unbind_keymap()
+       
+        
 if __name__ == "__main__":
     register()
