@@ -20,7 +20,7 @@ bl_info = {
     "name": "Align Selection To Gpencil Stroke",
     "description": "Aligns selection to a grease pencil stroke. Hold SHIFT and double-click LEFT MOUSE to execute.",
     "author": "Bjørnar Frøyse",
-    "version": (1, 0, 7),
+    "version": (1, 0, 8),
     "blender": (2, 7, 0),
     "location": "Tool Shelf",
     "warning": "",  # used for warning icon and text in addons panel
@@ -71,8 +71,17 @@ class AlignUVsToGpencil(bpy.types.Operator):
 
 
 def align_uvs(context, influence):
-    editor = bpy.context.area.spaces[0]
-    gps = editor.grease_pencil.layers[-1].active_frame.strokes[-1].points
+    uvGP = bpy.context.area.spaces[0].grease_pencil
+
+    ok = False
+    if(uvGP is not None):
+        if(len(uvGP.layers)>0):
+            if(len(uvGP.layers[-1].active_frame.strokes) > 0):
+                ok = True
+    if(ok == False):
+        return
+
+    gp = uvGP.layers[-1].active_frame
     obj = bpy.context.edit_object
     me = obj.data
     bm = bmesh.from_edit_mesh(me)
@@ -91,20 +100,16 @@ def align_uvs(context, influence):
     for vert in selected_uv_verts:
         selected_uv_verts_positions.append(vert.uv)
 
-    gpencil_points = []
-    for point in gps:
-        gpencil_points.append(point.co)
+    gpencil_points = [point.co for point in gp.strokes[-1].points]
 
     for i, v in enumerate(selected_uv_verts):
         nearest_point = get_nearest_interpolated_point_on_stroke(selected_uv_verts_positions[i], gpencil_points, context)
-        # newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * v.co)
         v.uv = v.uv.lerp(nearest_point, influence)
 
     bmesh.update_edit_mesh(me, True)
 
     if context.user_preferences.addons[__name__].preferences.clear_strokes:
-       editor.grease_pencil.layers[-1].active_frame.clear()
-
+       gp.strokes.remove(gp.strokes[-1])
 
 
 class AlignSelectionToGPencil(bpy.types.Operator):
@@ -129,46 +134,25 @@ class AlignSelectionToGPencil(bpy.types.Operator):
         # TODO: Make it work with the mesh.use_mirror_x setting.
         # TODO: Proportional editing
         # TODO: Support for bones (pose mode)
-        # TODO: Clear last drawn stroke only
 
         # Object mode
         if bpy.context.mode == 'OBJECT':
             align_objects(context, self.influence)
-            clear_gpencil_strokes(context)
             return {'FINISHED'}
 
-        # Proportional edit active
-        if bpy.context.active_object.type == 'MESH' and bpy.context.active_object.data.is_editmode and bpy.data.scenes["Scene"].tool_settings.proportional_edit != 'DISABLED':
-            align_vertices_proportional(context, self.influence)
-            clear_gpencil_strokes(context)
-            return {'FINISHED'}
-
-        # The regular mesh mode. Aligns vertices.
+        # Edit mode (vertices)
         if bpy.context.active_object.type == 'MESH' and bpy.context.active_object.data.is_editmode:
             align_vertices(context, self.influence)
-
-            clear_gpencil_strokes(context)
             return {'FINISHED'}
 
-        # Aligns bones in edit mode. Simple enough.
-        if bpy.context.active_object.type == 'ARMATURE' and bpy.context.active_object.data.is_editmode:
-            align_bones_editmode(context, self.influence)
-
-            clear_gpencil_strokes(context)
-            return {'FINISHED'}
-
-        # For bones in pose mode. Incomplete.
-        if bpy.context.active_object.type == 'ARMATURE' and not bpy.context.active_object.data.is_editmode and bpy.context.active_object.pose is not None:
-            align_bones_posemode(context, self.influence)
-
-            clear_gpencil_strokes(context)
-            return {'FINISHED'}
-
-        # Aligns curve points
+        # Curves
         if bpy.context.active_object.type == 'CURVE' and bpy.context.active_object.data.is_editmode:
             align_curves(context, self.influence)
+            return {'FINISHED'}
 
-            clear_gpencil_strokes(context)
+        # Bone edit mode
+        if bpy.context.active_object.type == 'ARMATURE' and bpy.context.active_object.data.is_editmode:
+            align_bones_editmode(context, self.influence)
             return {'FINISHED'}
 
         print("No valid cases found. Try again with another selection!")
@@ -176,84 +160,11 @@ class AlignSelectionToGPencil(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-       if len(bpy.data.grease_pencil) is 0:
-           return False
-       elif len(bpy.data.grease_pencil[-1].layers) is 0:
-           return False
-       elif bpy.data.grease_pencil[-1].layers[-1].active_frame is None:
-           return False
-       elif len(bpy.data.grease_pencil[-1].layers[-1].active_frame.strokes) is 0:
-           return False
-       else:
-           return True
-
-
-def align_bones_posemode(context, influence):
-    print("\nAligning Pose Mode Bones\nThis is pretty 'experimental' at the moment. Don't expect good results!")
-    # print("View Matrix:\n", bpy.context.space_data.region_3d.view_matrix)
-
-    # Gets negative values, but it seems to work :)
-    rotation_axis = bpy.context.space_data.region_3d.view_matrix.row[2].xyz
-
-    # print("View Matrix Column 3:\n", rotation_axis)
-
-    view_matrix = bpy.context.space_data.region_3d.view_matrix.to_3x3()
-
-    obj = bpy.context.active_object
-
-    selected_p_bones = bpy.context.selected_pose_bones
-
-    p_bone_tails_3d = [p_bone.tail for p_bone in selected_p_bones]
-    p_bone_tails_2d = vectors_to_screenpos(context, p_bone_tails_3d, obj.matrix_world)
-
-    for p_bone in selected_p_bones:
-        p_bone.bone.select = False
-
-
-    for r in range(0,5):
-        for i, p_bone in enumerate(selected_p_bones):
-            p_bone.bone.select = True
-            closest_segment = get_closest_segment(p_bone_tails_2d[i], gpencil_to_screenpos(context), context)
-
-            side = is_left(closest_segment[0], closest_segment[1], p_bone_tails_2d[i])
-            determinator = side
-            
-            nearest_point = get_nearest_interpolated_point_on_stroke(p_bone_tails_2d[i], gpencil_to_screenpos(context), context)
-
-            # print("\nSide is", side)
-            # print("Determinator is", determinator, "\n")
-            iteration = 0
-            while side is determinator and iteration < 50:
-                if side == False:
-                    bpy.ops.transform.rotate(value=-0.01, axis=rotation_axis)
-                if side == True:
-                    bpy.ops.transform.rotate(value=0.01, axis=rotation_axis)
-                current_tail_pos = vectors_to_screenpos(context, p_bone_tails_3d[i], obj.matrix_world)
-                side = is_left(closest_segment[0], closest_segment[1], current_tail_pos)
-                iteration += 1
-                # print("Side is", side)
-            # print("\nCOMPLETE\n")
-            p_bone.bone.select = False
-
-    for p_bone in selected_p_bones:
-        p_bone.bone.select = True
-
-        #newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * p_bone.tail)
-        #p_bone.bone.tail = p_bone.tail.lerp(newcoord, influence)
-
-
-def is_left(point_a, point_b, point_c):
-    return ((point_b[0] - point_a[0]) * (point_c[1] - point_a[1]) - (point_b[1] - point_a[1]) * (point_c[0] - point_a[0])) > 0
+        return check_if_any_gp_exists(context)
 
 def align_bones_editmode(context, influence):
-    # Last drawn gpencil stroke.
-    #gps = bpy.data.grease_pencil[-1].layers[-1].active_frame
-
-    # Object currently in edit mode.
     obj = bpy.context.edit_object
-    # Object's mesh datablock.
     bo = obj.data.edit_bones
-    # Get all selected bones (in their local space).
 
     selected_bones = [bone for bone in bo if bone.select]
 
@@ -263,149 +174,16 @@ def align_bones_editmode(context, influence):
     bone_tails_3d = [bone.tail for bone in selected_bones]
     bone_tails_2d = vectors_to_screenpos(context, bone_tails_3d, obj.matrix_world)
 
-    points_2d = gpencil_to_screenpos(context)
-
+    stroke = gpencil_to_screenpos(context)
+    
     for i, bone in enumerate(selected_bones):
-        nearest_point_for_head = get_nearest_interpolated_point_on_stroke(bone_heads_2d[i], points_2d, context)
+        nearest_point_for_head = get_nearest_interpolated_point_on_stroke(bone_heads_2d[i], stroke, context)
         newcoord_for_head = obj.matrix_world.inverted() * region_to_location(nearest_point_for_head, obj.matrix_world * bone.head)
         bone.head = bone.head.lerp(newcoord_for_head, influence)
 
-        nearest_point_for_tail = get_nearest_interpolated_point_on_stroke(bone_tails_2d[i], points_2d, context)
+        nearest_point_for_tail = get_nearest_interpolated_point_on_stroke(bone_tails_2d[i], stroke, context)
         newcoord_for_tail = obj.matrix_world.inverted() * region_to_location(nearest_point_for_tail, obj.matrix_world * bone.tail)
         bone.tail = bone.tail.lerp(newcoord_for_tail, influence)
-
-
-
-    prop_size = bpy.data.scenes["Scene"].tool_settings.proportional_size
-    prop_falloff = bpy.data.scenes["Scene"].tool_settings.proportional_edit_falloff
-
-    if prop_falloff == 'SHARP':
-        prop_falloff = 0
-    if prop_falloff == 'SMOOTH':
-        prop_falloff = 1
-    if prop_falloff == 'ROOT':
-        prop_falloff = 2
-    if prop_falloff == 'LINEAR':
-        prop_falloff = 3
-    if prop_falloff == 'CONSTANT':
-        prop_falloff = 4
-    if prop_falloff == 'SPHERE':
-        prop_falloff = 5
-    if prop_falloff == 'RANDOM':
-        prop_falloff = 6
-
-    # Object currently in edit mode.
-    obj = bpy.context.edit_object
-    # Object's mesh datablock.
-    me = obj.data
-    # Convert mesh data to bmesh.
-    bm = bmesh.from_edit_mesh(me)
-
-    # Get all selected vertices (in their local space).
-    selected_verts = [v for v in bm.verts if v.select]
-
-    # print("\n ///////// \n")
-    unselected_verts_within_radius = []
-    for selected_vert in selected_verts:
-        for vert in bm.verts:
-            if not vert.select:
-                dist = (vert.co - selected_vert.co).length 
-                if dist <= prop_size:
-                    # print("\nVertex:", vert.index, "\nDist: ", dist, "\nProp_size:", prop_size)
-                    unselected_verts_within_radius.append(vert)
-
-    unselected_verts_within_radius = list(set(unselected_verts_within_radius))
-
-    # This can probably be merged with the above list
-    unselected_verts_nearest_vert_distance = []
-    for vert in unselected_verts_within_radius:
-        maxdist = 999.0
-        nearest_vert = None
-        for selected_vert in selected_verts:
-            vdist = (vert.co - selected_vert.co).length
-            if vdist <= maxdist:
-                maxdist = vdist
-                nearest_vert = selected_vert
-        unselected_verts_nearest_vert_distance.append([vert.index, nearest_vert.index, abs(maxdist)])
-
-    # print("\nUnselected Verts Nearest Verts Distance\n", unselected_verts_nearest_vert_distance)
-
-    verts_local_3d = [v.co for v in selected_verts]
-    verts_world_2d = vectors_to_screenpos(context, verts_local_3d, obj.matrix_world)
-
-    final_vert_positions = []
-    distances_for_prop_edit = {}
-    for i, v in enumerate(selected_verts):
-        nearest_point = get_nearest_interpolated_point_on_stroke(verts_world_2d[i], gpencil_to_screenpos(context), context)
-        distances_for_prop_edit[v.index] = ((mathutils.Vector(verts_world_2d[i]) - mathutils.Vector(nearest_point)))
-        newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * v.co)
-        final_vert_positions.append(newcoord)
-
-    # print("\nDistances For Prop edit\n", distances_for_prop_edit)
-
-    unselected_verts_3d = [v.co for v in unselected_verts_within_radius]
-    unselected_verts_2d = vectors_to_screenpos(context, unselected_verts_3d, obj.matrix_world)
-
-    for i, v in enumerate(unselected_verts_within_radius):
-        # print("i: ", i)
-        # print("v: ", v)
-        # Distance had to be inverted to work. Not sure why.
-        distance = 1 - unselected_verts_nearest_vert_distance[i][2]
-        # print("\nVertex", v.index, "\nDistance", distance)
-
-        proportional_influence = 0
-        
-        # These are grabbed almost directly from the Blender source. Should work as expected.
-        # SHARP
-        if prop_falloff == 0:
-            proportional_influence = distance * distance
-        
-        # SMOOTH
-        if prop_falloff == 1:
-            proportional_influence = 3.0 * distance * distance - 2.0 * distance * distance * distance
-        
-        # ROOT
-        if prop_falloff == 2:
-            proportional_influence = math.sqrt(distance)
-        
-        # LINEAR
-        if prop_falloff == 3:
-            proportional_influence = distance
-        
-        # CONSTANT
-        if prop_falloff == 4:
-            proportional_influence = 1.0
-        
-        # SPHERE
-        if prop_falloff == 5:
-            proportional_influence = math.sqrt(2 * distance - distance * distance)
-        
-        # RANDOM
-        if prop_falloff == 6:
-            proportional_influence = mathutils.noise.random() * distance
-
-        # print("Prop_influence_BEFORE:", proportional_influence)
-
-        # print("\nNearest Vert for This Vert: ", unselected_verts_nearest_vert_distance[i][1])
-        # proportional_influence = clamp(0, 1, proportional_influence)g
-        # proportional_influence = prop_size / proportional_influence
-        # print("Prop_influence_AFTER", proportional_influence)
-        nearest_point = mathutils.Vector(unselected_verts_2d[i]) - distances_for_prop_edit[unselected_verts_nearest_vert_distance[i][1]]
-        # nearest_point = get_nearest_interpolated_point_on_stroke(unselected_verts_2d[i], gpencil_to_screenpos(context), context)
-
-        newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * v.co)
-        v.co = v.co.lerp(newcoord, influence * proportional_influence)
-
-    for i, v in enumerate(selected_verts):
-        v.co = v.co.lerp(final_vert_positions[i], influence)
-
-    # Recalculate mesh normals (so lighting looks right).
-    for edge in bm.edges:
-        edge.normal_update()
-
-
-    # Push bmesh changes back to the actual mesh datablock.
-    bmesh.update_edit_mesh(me, True)    
 
 
 def align_vertices(context, influence):
@@ -425,9 +203,11 @@ def align_vertices(context, influence):
     # IMPORTANT: Multiply vertex coordinates with the world matrix to get their WORLD position, not local position.
     verts_world_2d = vectors_to_screenpos(context, verts_local_3d, obj.matrix_world)
 
+    stroke = gpencil_to_screenpos(context)
+
     # For each vert, look up or to the side and find the nearest interpolated gpencil point for this vertex.
     for i, v in enumerate(selected_verts):
-        nearest_point = get_nearest_interpolated_point_on_stroke(verts_world_2d[i], gpencil_to_screenpos(context), context)
+        nearest_point = get_nearest_interpolated_point_on_stroke(verts_world_2d[i], stroke, context)
         # Get new vertex coordinate by converting from 2D screen space to 3D world space. Must multiply depth coordinate
         # with world matrix and then final result by INVERTED world matrix to get a correct final value.
         newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * v.co)
@@ -466,8 +246,10 @@ def align_curves(context, influence):
         points_local_3d = [p.co for p in selected_points]
         points_world_2d = vectors_to_screenpos(context, points_local_3d, obj.matrix_world)
 
+        stroke = gpencil_to_screenpos(context)
+
         for i, p in enumerate(selected_points):
-            nearest_point = get_nearest_interpolated_point_on_stroke(points_world_2d[i], gpencil_to_screenpos(context), context)
+            nearest_point = get_nearest_interpolated_point_on_stroke(points_world_2d[i], stroke, context)
             # Get new vertex coordinate by converting from 2D screen space to 3D world space. Must multiply depth coordinate
             # with world matrix and then final result by INVERTED world matrix to get a correct final value.
             newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * p.co)
@@ -486,24 +268,28 @@ def align_curves(context, influence):
         bezier_points_local_3d = [p.co for p in selected_bezier_points]
         bezier_points_world_2d = vectors_to_screenpos(context, bezier_points_local_3d, obj.matrix_world)
 
+        stroke = gpencil_to_screenpos(context)
+
         for i, p in enumerate(selected_bezier_points):
-            nearest_point = get_nearest_interpolated_point_on_stroke(bezier_points_world_2d[i], gpencil_to_screenpos(context), context)
+            nearest_point = get_nearest_interpolated_point_on_stroke(bezier_points_world_2d[i], stroke, context)
             newcoord = obj.matrix_world.inverted() * region_to_location(nearest_point, obj.matrix_world * p.co)
             if p.handle_left_type == 'FREE' or p.handle_left_type == 'ALIGNED' or p.handle_right_type == 'FREE' or p.handle_right_type == 'ALIGNED':
                 print("Supported handle modes: 'VECTOR', 'AUTO'. Please convert. Sorry!")
                 return{'CANCELLED'}
 
             p.co = p.co.lerp(newcoord.to_4d(), influence)
-            p.handle_left = obj.matrix_world.inverted() * region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_left, gpencil_to_screenpos(context), context), obj.matrix_world * p.handle_left) 
-            p.handle_right = obj.matrix_world.inverted() * region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_right, gpencil_to_screenpos(context), context), obj.matrix_world * p.handle_right) 
+            p.handle_left = obj.matrix_world.inverted() * region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_left, stroke, context), obj.matrix_world * p.handle_left) 
+            p.handle_right = obj.matrix_world.inverted() * region_to_location(get_nearest_interpolated_point_on_stroke(p.handle_right, stroke, context), obj.matrix_world * p.handle_right) 
 
 
 def align_objects(context, influence):
     selected_objs = bpy.context.selected_objects
 
+    stroke = gpencil_to_screenpos(context)
+
     for i, obj in enumerate(selected_objs):
         obj_loc_2d = vectors_to_screenpos(context, obj.location, obj.matrix_world * obj.matrix_world.inverted())
-        nearest_point = get_nearest_interpolated_point_on_stroke(obj_loc_2d, gpencil_to_screenpos(context), context)
+        nearest_point = get_nearest_interpolated_point_on_stroke(obj_loc_2d, stroke, context)
 
         newcoord = region_to_location(nearest_point, obj.location)
         obj.location = obj.location.lerp(newcoord, influence)
@@ -612,16 +398,56 @@ def get_closest_segment(vertex_2d, points_2d, context):
     return segment
 
 
-def clear_gpencil_strokes(context):
-    if context.user_preferences.addons[__name__].preferences.clear_strokes:
-        bpy.context.active_object.grease_pencil.layers[-1].active_frame.clear()
-
-
 def gpencil_to_screenpos(context):
-    gps = bpy.context.active_object.grease_pencil.layers[-1].active_frame
-    points_2d = [location_to_region(point.co) for point in gps.strokes[-1].points if (len(gps.strokes) > 0)]
+    gp = 0
+
+    sceneGP = bpy.context.scene.grease_pencil
+    objectGP = bpy.context.active_object.grease_pencil
+
+    if(check_if_scene_gp_exists(context)):
+        gp = sceneGP.layers[-1].active_frame
+    elif(check_if_object_gp_exists(context)):
+        gp = objectGP.layers[-1].active_frame
+
+    if(gp == 0):
+        points_2d = [(0,0), (0,10)]
+    else:
+        points_2d = [location_to_region(point.co) for point in gp.strokes[-1].points if (len(gp.strokes) > 0)]
+        if context.user_preferences.addons[__name__].preferences.clear_strokes:
+            gp.strokes.remove(gp.strokes[-1])
+
+    
     return points_2d
 
+def check_if_any_gp_exists(context):
+    if(check_if_object_gp_exists(context)):
+        return True
+    elif(check_if_scene_gp_exists(context)):
+        return True
+    else:
+        return False
+
+
+def check_if_object_gp_exists(context):
+    objectGP = bpy.context.active_object.grease_pencil
+
+    if(objectGP is not None):
+        if(len(objectGP.layers)>0):
+            if(len(objectGP.layers[-1].active_frame.strokes) > 0):
+                return True
+
+    return False
+
+
+def check_if_scene_gp_exists(context):
+    sceneGP = bpy.context.scene.grease_pencil
+
+    if(sceneGP is not None):
+        if(len(sceneGP.layers)>0):
+            if(len(sceneGP.layers[-1].active_frame.strokes) > 0):
+                return True
+
+    return False
 
 def vectors_to_screenpos(context, list_of_vectors, matrix):
     if type(list_of_vectors) is mathutils.Vector:
@@ -668,18 +494,14 @@ def map_range(fromrange, torange, value):
         a2 += 0.0001
     return b1 + ((value - a1) * (b2 - b1) / (a2 - a1))
 
-
-import bpy_extras
-
-
 # Utility functions for converting between 2D and 3D coordinates
 def location_to_region(worldcoords):
-    out = bpy_extras.view3d_utils.location_3d_to_region_2d(bpy.context.region, bpy.context.space_data.region_3d, worldcoords)
+    out = view3d_utils.location_3d_to_region_2d(bpy.context.region, bpy.context.space_data.region_3d, worldcoords)
     return out
 
 
 def region_to_location(viewcoords, depthcoords):
-    return bpy_extras.view3d_utils.region_2d_to_location_3d(bpy.context.region, bpy.context.space_data.region_3d, viewcoords, depthcoords)
+    return view3d_utils.region_2d_to_location_3d(bpy.context.region, bpy.context.space_data.region_3d, viewcoords, depthcoords)
 
 
 class AlignSelectionToGpencilBUTTON(bpy.types.Panel):
