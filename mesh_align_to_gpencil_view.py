@@ -17,10 +17,10 @@
 # ##### END GPL LICENSE BLOCK #####
 
 bl_info = {
-    "name": "Bear - Align Selection To Gpencil Stroke",
-    "description": "Aligns selected vertices to the last drawn gpencil stroke. Only horizontal or vertical alignment for now.",
+    "name": "Align Selection To Gpencil Stroke",
+    "description": "Aligns selection to a grease pencil stroke. Hold SHIFT and double-click LEFT MOUSE to execute.",
     "author": "Bjørnar Frøyse",
-    "version": (1, 0, 6),
+    "version": (1, 0, 7),
     "blender": (2, 7, 0),
     "location": "Tool Shelf",
     "warning": "",  # used for warning icon and text in addons panel
@@ -38,7 +38,7 @@ import math
 
 
 # Preferences for the addon (Displayed "inside" the addon in user preferences)
-class AlignVertsToGpencilAddonPrefs(bpy.types.AddonPreferences):
+class AlignSelectionToGpencilAddonPrefs(bpy.types.AddonPreferences):
     bl_idname = __name__
     clear_strokes = bpy.props.BoolProperty(
             name = "Clear Strokes On Execute",
@@ -54,7 +54,7 @@ class AlignVertsToGpencilAddonPrefs(bpy.types.AddonPreferences):
 
 class AlignUVsToGpencil(bpy.types.Operator):
     """Aligns UV selection to gpencil stroke"""
-    bl_idname = "uv.align_verts_to_gpencil"
+    bl_idname = "bear.uv_align_to_gpencil"
     bl_label = "Align UV Verts to Gpencil"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -107,9 +107,9 @@ def align_uvs(context, influence):
 
 
 
-class AlignVertsToGpencil(bpy.types.Operator):
+class AlignSelectionToGPencil(bpy.types.Operator):
     """Aligns selection to gpencil stroke"""
-    bl_idname = "mesh.align_verts_to_gpencil"
+    bl_idname = "bear.align_to_gpencil"
     bl_label = "Align Verts to Gpencil"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -174,16 +174,18 @@ class AlignVertsToGpencil(bpy.types.Operator):
         print("No valid cases found. Try again with another selection!")
         return{'FINISHED'}
 
-    #@classmethod
-    #def poll(cls, context):
-    #    if len(bpy.data.grease_pencil[-1].layers) is 0:
-    #        return False
-    #    elif bpy.data.grease_pencil[-1].layers[-1].active_frame is None:
-    #        return False
-    #    elif len(bpy.data.grease_pencil[-1].layers[-1].active_frame.strokes) is 0:
-    #        return False
-    #    else:
-    #        return True
+    @classmethod
+    def poll(cls, context):
+       if len(bpy.data.grease_pencil) is 0:
+           return False
+       elif len(bpy.data.grease_pencil[-1].layers) is 0:
+           return False
+       elif bpy.data.grease_pencil[-1].layers[-1].active_frame is None:
+           return False
+       elif len(bpy.data.grease_pencil[-1].layers[-1].active_frame.strokes) is 0:
+           return False
+       else:
+           return True
 
 
 def align_bones_posemode(context, influence):
@@ -273,7 +275,7 @@ def align_bones_editmode(context, influence):
         bone.tail = bone.tail.lerp(newcoord_for_tail, influence)
 
 
-def align_vertices_proportional(context, influence):
+
     prop_size = bpy.data.scenes["Scene"].tool_settings.proportional_size
     prop_falloff = bpy.data.scenes["Scene"].tool_settings.proportional_edit_falloff
 
@@ -680,43 +682,51 @@ def region_to_location(viewcoords, depthcoords):
     return bpy_extras.view3d_utils.region_2d_to_location_3d(bpy.context.region, bpy.context.space_data.region_3d, viewcoords, depthcoords)
 
 
-class AlignVertsToGpencilBUTTON(bpy.types.Panel):
+class AlignSelectionToGpencilBUTTON(bpy.types.Panel):
     bl_category = "Tools"
     bl_label = "Gpencil Align"
     bl_space_type = "VIEW_3D"
     bl_region_type = "TOOLS"
-    #bl_context = "mesh_edit"
 
     def draw(self, context):
         layout = self.layout
-        layout.operator("mesh.align_verts_to_gpencil")
+        layout.operator("bear.align_to_gpencil")
 
 class AlignUVsToGpencilBUTTON(bpy.types.Panel):
     bl_category = "Tools"
     bl_label = "Gpencil Align"
     bl_space_type = 'IMAGE_EDITOR'
     bl_region_type = "TOOLS"
-    #bl_context = "mesh_edit"
 
     def draw(self, context):
         layout = self.layout
-        layout.operator("uv.align_verts_to_gpencil")
+        layout.operator("bear.uv_align_to_gpencil")
 
+
+classes = [AlignSelectionToGpencilAddonPrefs, AlignSelectionToGPencil, AlignSelectionToGpencilBUTTON, AlignUVsToGpencil, AlignUVsToGpencilBUTTON]
+addon_keymaps = []
 
 def register():
-    bpy.utils.register_class(AlignVertsToGpencilAddonPrefs)
-    bpy.utils.register_class(AlignVertsToGpencil)
-    bpy.utils.register_class(AlignVertsToGpencilBUTTON)
-    bpy.utils.register_class(AlignUVsToGpencil)
-    bpy.utils.register_class(AlignUVsToGpencilBUTTON)
+    for c in classes:
+        bpy.utils.register_class(c)
+
+    km = bpy.context.window_manager.keyconfigs.addon.keymaps.new(name='3D View', space_type='VIEW_3D')
+    kmi = km.keymap_items.new("bear.align_to_gpencil", 'LEFTMOUSE', 'DOUBLE_CLICK', False, True)
+    addon_keymaps.append((km, kmi))
+
+    km = bpy.context.window_manager.keyconfigs.addon.keymaps.new(name='UV Editor', space_type='IMAGE_EDITOR')
+    kmi = km.keymap_items.new("bear.uv_align_to_gpencil", 'LEFTMOUSE', 'DOUBLE_CLICK', False, True)
+    addon_keymaps.append((km, kmi))
 
 
 def unregister():
-    bpy.utils.unregister_class(AlignVertsToGpencilAddonPrefs)
-    bpy.utils.unregister_class(AlignVertsToGpencil)
-    bpy.utils.unregister_class(AlignVertsToGpencilBUTTON)
-    bpy.utils.unregister_class(AlignUVsToGpencil)
-    bpy.utils.unregister_class(AlignUVsToGpencilBUTTON)
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
+    
+    for c in reversed(classes):
+        bpy.utils.unregister_class(c)
+
 
 if __name__ == "__main__":
     register()
