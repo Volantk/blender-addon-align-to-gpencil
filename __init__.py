@@ -20,7 +20,7 @@ bl_info = {
     "name": "Align Selection To Gpencil Stroke",
     "description": "Aligns selection to a grease pencil stroke. Hold SHIFT and double-click LEFT MOUSE to execute.",
     "author": "Bjørnar Frøyse",
-    "version": (1, 2, 0),
+    "version": (1, 2, 1),
     "blender": (2, 80, 0),
     "location": "Tool Shelf",
     # "warning": "nooo",  # used for warning icon and text in addons panel
