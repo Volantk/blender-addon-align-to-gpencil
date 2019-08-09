@@ -410,17 +410,14 @@ def get_closest_segment(vertex_2d, points_2d, context):
 
 
 def gpencil_to_screenpos(context):
-    gp = 0
+    gp = None
 
     sceneGP = bpy.context.scene.grease_pencil
-    objectGP = bpy.context.active_object.grease_pencil
 
     if(check_if_scene_gp_exists(context)):
         gp = sceneGP.layers[-1].active_frame
-    elif(check_if_object_gp_exists(context)):
-        gp = objectGP.layers[-1].active_frame
 
-    if(gp == 0):
+    if(gp == None):
         points_2d = [(0,0), (0,10)]
     else:
         points_2d = [location_to_region(point.co) for point in gp.strokes[-1].points if (len(gp.strokes) > 0)]
@@ -430,24 +427,9 @@ def gpencil_to_screenpos(context):
     
     return points_2d
 
+
 def check_if_any_gp_exists(context):
-    if(check_if_object_gp_exists(context)):
-        return True
-    elif(check_if_scene_gp_exists(context)):
-        return True
-    else:
-        return False
-
-
-def check_if_object_gp_exists(context):
-    objectGP = bpy.context.active_object.grease_pencil
-
-    if(objectGP is not None):
-        if(len(objectGP.layers)>0):
-            if(len(objectGP.layers[-1].active_frame.strokes) > 0):
-                return True
-
-    return False
+    return check_if_scene_gp_exists(context)
 
 
 def check_if_scene_gp_exists(context):
