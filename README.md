@@ -1,5 +1,5 @@
 # blender-addon-align-to-gpencil
-
+Youtube demo: https://youtu.be/r0Hpu16PN7o
 Blenderartists thread: https://blenderartists.org/t/align-selection-to-grease-pencil-2-80/605909
 
 
