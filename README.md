@@ -1,10 +1,13 @@
-# blender-addon-align-to-gpencil
+# Blender addon align to gpencil annotation
+
 Youtube demo: https://youtu.be/r0Hpu16PN7o
 
 Blenderartists thread: https://blenderartists.org/t/align-selection-to-grease-pencil-2-80/605909
 
 
 Changelog:
+
+1.2.3: SB(pullusb): fix kmi register order. Added mouse buttons and key modifiers customisation
 
 1.2.1: Fixes for 2.80. Moved to github.
 

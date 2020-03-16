@@ -17,10 +17,10 @@
 # ##### END GPL LICENSE BLOCK #####
 
 bl_info = {
-    "name": "Align Selection To Gpencil Stroke",
-    "description": "Aligns selection to a grease pencil stroke. Default hotkey is [ALT + double-click RIGHT MOUSE].",
+    "name": "Align Selection To Annotation Stroke",
+    "description": "Aligns selection to last annotation grease pencil stroke. Default hotkey is [ALT + double-click RIGHT MOUSE].",
     "author": "Bjørnar Frøyse",
-    "version": (1, 2, 2),
+    "version": (1, 2, 3),
     "blender": (2, 80, 0),
     "location": "Shortcut Only",
     "category": "Mesh"
@@ -52,26 +52,74 @@ class PREFS_bear_align_to_gpencil(bpy.types.AddonPreferences):
 
     use_default_shortcut: BoolProperty(
             name = "Use Default Shortcut",
-            description = "Use default shortcut: Alt+double-click right mouse",
+            description = "Use default shortcut: mouse double-click + modifier",
             default = True)
+
+    mouse_click : bpy.props.EnumProperty(
+        name="Mouse button", description="Double click on right/left/middle mouse button in combination with a modifier to trigger alignement",
+        default='RIGHTMOUSE',
+        items=(
+            ('RIGHTMOUSE', 'double Right click', 'Use double click on Right mouse button', 'MOUSE_RMB', 0),
+            ('LEFTMOUSE', 'double Left click', 'Use double click on Left mouse button', 'MOUSE_LMB', 1),
+            ('MIDDLEMOUSE', 'double Mid click', 'Use double click on Mid mouse button', 'MOUSE_MMB', 2),
+            ))
+    
+    use_shift: BoolProperty(
+            name = "combine with shift",
+            description = "add shift combined with double click to trigger alignement",
+            default = False)
+
+    use_alt: BoolProperty(
+            name = "combine with alt",
+            description = "add alt combined with double click to trigger alignement (default)",
+            default = True)
+
+    use_ctrl: BoolProperty(
+            name = "combine with ctrl",
+            description = "add ctrl combined with double click to trigger alignement",
+            default = False)
 
     def draw(self, context):
 
         self.layout.prop(self, "clear_strokes")
-        self.layout.prop(self, "use_default_shortcut")
-
         if(self.clear_strokes):
-            self.layout.label(text="Be warned: This will currently make the influence slider stop working", icon="ERROR")
+            self.layout.label(text="'clear strokes' option will currently make the influence slider stop working", icon="ERROR")
+
+        self.layout.prop(self, "use_default_shortcut", text='Bind shortcuts')
 
         if(self.use_default_shortcut):
-            self.layout.label(text="Use [Alt+double-click right mouse button] to execute.", icon="ERROR")
+            self.row = self.layout.row()
+            self.row.label(text="After changes, use the Bind/Rebind button")#icon=""
+            self.row.operator("prefs.bear_rebind_shortcut", text='Bind/Rebind shortcuts', icon='FILE_REFRESH')#EVENT_SPACEKEY
+            self.layout.prop(self, "mouse_click",text='')
+            self.layout.prop(self, "use_alt", text='+ Alt')
+            self.layout.prop(self, "use_shift", text='+ Shift')
+            self.layout.prop(self, "use_ctrl", text='+ Ctrl')
+            self.layout.label(text="Choose at least one modifier to combine with the double click (default: Alt)", icon="INFO")
+
         else:
-            self.layout.label(text="No hotkey has been set automatically. It's recommended to set one for. The following operators need to be set:\nmesh.bear_align_selection_to_gpencil\nobject.bear_align_selection_to_gpencil\nuv.bear_align_selection_to_gpencil\narmature.bear_align_selection_to_gpencil\ncurve.bear_align_selection_to_gpencil\n", icon="ERROR")
+            self.layout.label(text="No hotkey has been set automatically. Following operators needs to be set manually:", icon="ERROR")
+            self.layout.label(text="mesh.bear_align_selection_to_gpencil")
+            self.layout.label(text="object.bear_align_selection_to_gpencil")
+            self.layout.label(text="uv.bear_align_selection_to_gpencil")
+            self.layout.label(text="armature.bear_align_selection_to_gpencil")
+            self.layout.label(text="curve.bear_align_selection_to_gpencil")
 
         if self.use_default_shortcut:
             bind_keymap()
         else:
             unbind_keymap()
+
+class PREFS_OT_rebind(Operator):
+    """Rebind shortchuts for align to gp annotation"""
+    bl_idname = "prefs.bear_rebind_shortcut"
+    bl_label = "Rebind bear shortcut"
+    bl_options = {'REGISTER', 'INTERNAL'}#internal mask it from search bar
+
+    def execute(self, context):
+        unbind_keymap()
+        bind_keymap()
+        return{'FINISHED'}
 
 class OBJECT_OT_bear_align_to_gpencil(Operator):
     """Aligns selected objects to grease pencil stroke"""
@@ -514,24 +562,27 @@ classes = (OBJECT_OT_bear_align_to_gpencil,
     MESH_OT_bear_align_to_gpencil,
     CURVE_OT_bear_align_to_gpencil,
     ARMATURE_OT_bear_align_to_gpencil,
-    PREFS_bear_align_to_gpencil)
+    PREFS_bear_align_to_gpencil,
+    PREFS_OT_rebind)
 
 addon_keymaps = []
 
 def bind_keymap():
-
+    pref = bpy.context.preferences.addons[__name__].preferences
     # If user doesn't want to create default hotkey, we shall not do so
-
-    if not bpy.context.preferences.addons[__name__].preferences.use_default_shortcut:
+    if not pref.use_default_shortcut:
         return
 
-    # Create categories if they don't exist
-
+    # Check if hotkey has already been set, to avoid duplicates when auto creating hotkey
     try:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps["Mesh"]
     except Exception as e:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Mesh", space_type='EMPTY', region_type='WINDOW')
         pass
+
+    if "mesh.bear_align_selection_to_gpencil" not in km.keymap_items:
+        kmi = km.keymap_items.new(idname="mesh.bear_align_selection_to_gpencil", type=pref.mouse_click , value='DOUBLE_CLICK', any=False, alt=pref.use_alt, ctrl=pref.use_ctrl, shift=pref.use_shift)
+        addon_keymaps.append((km, kmi))
 
     try:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps["Object Mode"]
@@ -539,11 +590,19 @@ def bind_keymap():
         km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Object Mode", space_type='EMPTY', region_type='WINDOW')
         pass
 
+    if "object.bear_align_selection_to_gpencil" not in km.keymap_items:
+        kmi = km.keymap_items.new(idname="object.bear_align_selection_to_gpencil", type=pref.mouse_click , value='DOUBLE_CLICK', any=False, alt=pref.use_alt, ctrl=pref.use_ctrl, shift=pref.use_shift)
+        addon_keymaps.append((km, kmi))
+
     try:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps["UV Editor"]
     except Exception as e:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("UV Editor", space_type='EMPTY', region_type='WINDOW')
         pass
+
+    if "uv.bear_align_selection_to_gpencil" not in km.keymap_items:
+        kmi = km.keymap_items.new(idname="uv.bear_align_selection_to_gpencil", type=pref.mouse_click , value='DOUBLE_CLICK', any=False, alt=pref.use_alt, ctrl=pref.use_ctrl, shift=pref.use_shift)
+        addon_keymaps.append((km, kmi))
 
     try:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps["Armature"]
@@ -551,39 +610,19 @@ def bind_keymap():
         km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Armature", space_type='EMPTY', region_type='WINDOW')
         pass
 
+    if "armature.bear_align_selection_to_gpencil" not in km.keymap_items:
+        kmi = km.keymap_items.new(idname="armature.bear_align_selection_to_gpencil", type=pref.mouse_click , value='DOUBLE_CLICK', any=False, alt=pref.use_alt, ctrl=pref.use_ctrl, shift=pref.use_shift)
+        addon_keymaps.append((km, kmi))
+
     try:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps["Curve"]
     except Exception as e:
         km = bpy.context.window_manager.keyconfigs.addon.keymaps.new("Curve", space_type='EMPTY', region_type='WINDOW')
         pass
 
-
-    # Check if hotkey has already been set, to avoid duplicates when auto creating hotkey
-
-    if "mesh.bear_align_selection_to_gpencil" not in km.keymap_items:
-        kmi = km.keymap_items.new(idname="mesh.bear_align_selection_to_gpencil", type='RIGHTMOUSE', value='DOUBLE_CLICK', any=False, alt=True)
-        addon_keymaps.append((km, kmi))
-
-
-    if "object.bear_align_selection_to_gpencil" not in km.keymap_items:
-        kmi = km.keymap_items.new(idname="object.bear_align_selection_to_gpencil", type='RIGHTMOUSE', value='DOUBLE_CLICK', any=False, alt=True)
-        addon_keymaps.append((km, kmi))
-
-
-    if "uv.bear_align_selection_to_gpencil" not in km.keymap_items:
-        kmi = km.keymap_items.new(idname="uv.bear_align_selection_to_gpencil", type='RIGHTMOUSE', value='DOUBLE_CLICK', any=False, alt=True)
-        addon_keymaps.append((km, kmi))
-
-
-    if "armature.bear_align_selection_to_gpencil" not in km.keymap_items:
-        kmi = km.keymap_items.new(idname="armature.bear_align_selection_to_gpencil", type='RIGHTMOUSE', value='DOUBLE_CLICK', any=False, alt=True)
-        addon_keymaps.append((km, kmi))
-
-
     if "curve.bear_align_selection_to_gpencil" not in km.keymap_items:
-        kmi = km.keymap_items.new(idname="curve.bear_align_selection_to_gpencil", type='RIGHTMOUSE', value='DOUBLE_CLICK', any=False, alt=True)
+        kmi = km.keymap_items.new(idname="curve.bear_align_selection_to_gpencil", type=pref.mouse_click , value='DOUBLE_CLICK', any=False, alt=pref.use_alt, ctrl=pref.use_ctrl, shift=pref.use_shift)
         addon_keymaps.append((km, kmi))
-
 
 
 def unbind_keymap():
