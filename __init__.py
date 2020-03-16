@@ -135,7 +135,6 @@ class OBJECT_OT_bear_align_to_gpencil(Operator):
             )
 
     def execute(self, context):
-        print('in align ops OBJECT')
         # Object mode
         if bpy.context.mode == 'OBJECT':
             align_objects(context, self.influence)
@@ -159,7 +158,6 @@ class UV_OT_bear_align_to_gpencil(Operator):
             )
 
     def execute(self, context):
-        print('in align ops UV')
         align_uvs(context, self.influence)
         return {'FINISHED'}
 
@@ -178,7 +176,6 @@ class MESH_OT_bear_align_to_gpencil(Operator):
             )
 
     def execute(self, context):
-        print('in align ops MESH')
         # Edit mode (vertices)
         if bpy.context.active_object.type == 'MESH' and bpy.context.active_object.data.is_editmode:
             align_vertices(context, self.influence)
@@ -201,7 +198,6 @@ class CURVE_OT_bear_align_to_gpencil(Operator):
             )
 
     def execute(self, context):
-        print('in align ops CURVE')
         # Curves
         if bpy.context.active_object.type == 'CURVE' and bpy.context.active_object.data.is_editmode:
             align_curves(context, self.influence)
@@ -224,7 +220,6 @@ class ARMATURE_OT_bear_align_to_gpencil(Operator):
             )
 
     def execute(self, context):
-        print('in align ops ARMATURE')
         # Bone edit mode
         if bpy.context.active_object.type == 'ARMATURE' and bpy.context.active_object.data.is_editmode:
             align_bones_editmode(context, self.influence)
@@ -479,7 +474,6 @@ def gpencil_to_screenpos(context):
     gp = None
 
     sceneGP = bpy.context.scene.grease_pencil
-    print('sceneGP: ', sceneGP)
 
     if(check_if_scene_gp_exists(context)):
         gp = sceneGP.layers[-1].active_frame
@@ -587,7 +581,6 @@ def bind_keymap():
         pass
 
     if "mesh.bear_align_selection_to_gpencil" not in km.keymap_items:
-        print('bind mesh')
         kmi = km.keymap_items.new(idname="mesh.bear_align_selection_to_gpencil", type=pref.mouse_click , value='DOUBLE_CLICK', any=False, alt=pref.use_alt, ctrl=pref.use_ctrl, shift=pref.use_shift)
         addon_keymaps.append((km, kmi))
 
